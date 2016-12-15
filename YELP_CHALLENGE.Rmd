@@ -1,0 +1,209 @@
+---
+title: "YELP_CHALLENGE"
+author: "Zichun Liu"
+date: "11/28/2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(jsonlite)
+library(data.table)
+library(tidyr)
+library(ggplot2)
+library(ggmap)
+library(leaflet)
+```
+
+```{r}
+#review <- readRDS("review.RDS")
+
+#business <- stream_in(file("/Users/liuzichun/Desktop/MA684/YELP_Chanllege/yelp_dataset_challenge_academic_dataset/yelp_academic_dataset_business.json"))
+#saveRDS(business,"business.RDS")
+#users <- stream_in(file("/Users/liuzichun/Desktop/MA684/YELP_Chanllege/yelp_dataset_challenge_academic_dataset/yelp_academic_dataset_user.json"))
+#saveRDS(users,"users.RDS")
+#checkin <- stream_in(file("/Users/liuzichun/Desktop/MA684/YELP_Chanllege/yelp_dataset_challenge_academic_dataset/yelp_academic_dataset_checkin.json"))
+#saveRDS(checkin,"checkin.RDS")
+#tip <- stream_in(file("/Users/liuzichun/Desktop/MA684/YELP_Chanllege/yelp_dataset_challenge_academic_dataset/yelp_academic_dataset_tip.json"))
+#saveRDS(tip,"tip.RDS")
+
+
+```
+
+# I want to focus on Pittsburgh, So I will subset these data to narrow my workload
+```{r}
+business <- readRDS("business.RDS")
+pittbusiness <- business[business$state=="PA",]#business owners in Pittsburgh
+
+categories <- pittbusiness$categories %>% unlist() %>% table() %>% sort(decreasing = TRUE) %>% as.data.frame()
+head(categories)
+
+index <- NULL
+for (i in 1:nrow(pittbusiness)) {
+  if(sum(c("Food","Restaurants","Nightlife","Bars","Pizza","American (Traditional)","Coffee & Tea","Sandwiches","American (New)","Italian","Chinese","Burgers","Fast Food","Breakfast & Brunch","Mexican","Bakeries","Ice Cream & Frozen Yogurt","Specialty Food","Cafes","Diners","Pubs","Desserts","Seafood","Sports Bars","Thai","Sushi Bars","Chicken Wings","Mediterranean","Salad","Japanese","Barbeque","Indian","Steakhouses","Greek","Cocktail Bars","Hot Dogs","Vegetarian","Juice Bars & Smoothies","Bagels","French","Buffets","Korean","") %in% pittbusiness$categories[[i]]) > 0) {}
+  else {index <- c(index,i)}
+}
+pittbusiness <- pittbusiness[-index,]#restaurants in Pittsburgh
+
+review <- readRDS("review.RDS")
+pittreview <- subset(review, subset = business_id %in% pittbusiness$business_id)#reviews on restaurants in Pittsburgh
+
+users <- readRDS("users.RDS")
+pittusers <- subset(users, subset = user_id %in% pittreview$user_id) #users who have reviews on restaurants in Pittsburgh
+
+pittreview2 <- subset(review, subset = user_id %in% pittusers$user_id) # reviews of users who have reviews on restaurants in Pittsburgh
+
+checkin <- readRDS("checkin.RDS")
+pittcheckin <- subset(checkin, subset = business_id %in% pittbusiness$business_id) # checkin of restaurants in Pittsburgh
+
+tip <- readRDS("tip.RDS")
+pitttip <- subset(tip, subset = business_id %in% pittbusiness$business_id) #tips on restaurants in Pittsburgh
+pitttip2 <- subset(tip, subset = user_id %in% pittusers$user_id) #tips of users who have tip on restaurants in Pittsburgh
+
+save(pittbusiness,pittreview,pittreview2,pittusers,pittcheckin,pitttip,pitttip2,file = "Pittsburgh_data.Rdata")
+
+load(file = "Pittsburgh_data.Rdata")
+```
+
+
+# business manipulation
+```{r}
+pittbusiness$hours <- NULL
+pittbusiness$neighborhoods <- NULL
+attributes <- pittbusiness$attributes
+pittbusiness$attributes <- NULL
+categories <- pittbusiness$categories
+pittbusiness$categories <- NULL
+pittbusiness$type <- NULL
+
+for (i in 1:nrow(attributes)) {# collapse data frame
+  if (sum(is.na(attributes$`Good For`[i,]))==0) {
+    if (sum(attributes$`Good For`[i,]*1)==0) {
+      attributes$Suggest_For[i] <- "Not Mentioned"
+      print(i)
+      print("Not Mentioned")
+    }
+    else {
+      attributes$Suggest_For[i] <- paste(colnames(attributes$`Good For`)[which(attributes$`Good For`[i,]==TRUE)],collapse = ", ")
+      print(i)
+      print(paste(colnames(attributes$`Good For`)[which(attributes$`Good For`[i,]==TRUE)],collapse = ", "))
+    }
+  }
+  else {
+    attributes$Suggest_For[i] <- "No Record"
+    print(i)
+    print("No Record")
+  }
+}
+attributes$Suggest_For <- as.factor(attributes$Suggest_For)
+attributes$`Good For` <- NULL
+
+sum(attributes$Ambience[1,]==TRUE)
+paste(colnames(attributes$Ambience)[which(attributes$Ambience[1,]==TRUE)],collapse = ", ")
+for (i in 1:nrow(attributes)) {
+  print(i)
+  if (sum(is.na(attributes$Ambience[i,]))==0) {
+    if (sum(attributes$Ambience[i,]==TRUE)==0) {
+      attributes$Environment[i] <- "Not Mentioned"
+    }
+    else {
+      attributes$Environment[i] <- paste(colnames(attributes$Ambience)[which(attributes$Ambience[i,]==TRUE)],collapse = ", ")
+    }
+  }
+  else {
+    attributes$Environment[i] <- "No Record"
+  }
+}
+attributes$Ambience <- NULL
+
+attributes$Parking[1,]
+
+for (i in 1:nrow(attributes)) {
+  if(sum(is.na(attributes$Parking[i,]))==0) {
+    if (sum(attributes$Parking[i,]==TRUE)==0) {
+      attributes$Parkingcondition[i] <- "No parking"
+    }
+    else {
+      attributes$Parkingcondition[i] <- "Can parking"
+    }
+  }
+  else {
+    attributes$Parkingcondition[i] <- "No Record"
+  }
+}
+attributes$Parking <- NULL
+
+for (i in 1:nrow(attributes)) {
+  print(i)
+  if (sum(is.na(attributes$Music[i,])) == 0) {
+    if (sum(attributes$Music[i,]==TRUE)==0) {
+      attributes$Musiccondition[i] <- "No Music"
+    }
+    else {
+      attributes$Musiccondition[i] <- paste(colnames(attributes$Music)[which(attributes$Music[i,]==TRUE)],collapse = ", ")
+    }
+  }
+  else {
+    if (sum(is.na(attributes$Music[i,])) == 6) {
+      attributes$Musiccondition[i] <- "No Record"
+    }
+    else {
+      attributes$Music[i,][is.na(attributes$Music[i,])] <- FALSE
+      if (sum(attributes$Music[i,]==TRUE)==0) {
+        attributes$Musiccondition[i] <- "No Music"
+      }
+      else {
+        attributes$Musiccondition[i] <- paste(colnames(attributes$Music)[which(attributes$Music[i,]==TRUE)],collapse = ", ")
+      }
+    }
+  }
+}
+attributes$Music <- NULL
+
+attributes <- attributes[,c("Take-out","Noise Level","Delivery","Has TV","Outdoor Seating","Attire","Accepts Credit Cards","Price Range","Smoking","Wi-Fi","Suggest_For","Environment","Parkingcondition","Musiccondition")]
+colnames(attributes)
+attributes[is.na(attributes)] <- "No Record"
+
+pittbusiness <- cbind(pittbusiness, attributes) #now I have built the pitt-business data frame with useful attributes I needed
+```
+
+
+#Business exploration
+```{r}
+#location map
+geocode("Pittsburgh")
+
+pal <- colorFactor(c("#021430","#15275b","#233482","#9ac4e0","#ffffff","#f88b9e",
+             "#f13367","#eb004e","#cb0036"), domain = c(1,1.5,2,2.5,3,3.5,4,4.5,5))
+pal1 <- colorNumeric(palette = "Blues",domain = pittbusiness$stars)
+
+
+
+
+leaflet(pittbusiness) %>% addTiles() %>% 
+  setView( lng = -79.99589, lat = 40.44062, zoom = 12 ) %>% 
+  addTiles() %>% 
+  addCircleMarkers(
+    ~longitude,~latitude,
+    radius = 1,
+    color = ~pal1(stars),
+    fillOpacity = 0.5) %>%
+  addLegend("bottomright", pal = pal1, values = ~stars,
+    title = "Stars",
+    labFormat = labelFormat(prefix = ""),
+    opacity = 1
+  )
+
+
+```
+
+We can see that most of the restaurants are locate along the streets and have a trend of gather at down town(center of the city).
+What's more we can see from the color that in down town, northeast and other part of Pittsburgh where there are more restaurants(which means more competitors), where there have more good restaurants.
+
+```{r}
+ggplot(pittbusiness) + geom_bar(aes(stars),fill="navy") + guides(fill=FALSE)
+
+ggplot(pittbusiness) + geom_jitter(aes(x = stars,y = review_count),color="navy")
+
+```
+
