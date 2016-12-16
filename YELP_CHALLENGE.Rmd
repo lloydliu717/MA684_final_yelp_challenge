@@ -1,9 +1,36 @@
 ---
-title: "YELP_CHALLENGE"
+title: "Improve Linear Mixed effect Model by Sentiment Score"
 author: "Zichun Liu"
 date: "11/28/2016"
 output: html_document
+subtitle: '---Pittsburgh Yelp Data Challenge'
 ---
+
+#1. Introduction
+
+Yelp is an American multinational corporation headquartered in San Francisco, California. It develops, hosts and markets Yelp.com and the Yelp mobile app, which publish crowd-sourced reviews about local businesses, as well as the online reservation service Yelp Reservations and online food-delivery service Eat24. The company also trains small businesses in how to respond to reviews, hosts social events for reviewers, and provides data about businesses, including health inspection scores.
+
+Yelp is hosting a data challenge. The data includes
+• 2.7M reviews and 649K tips by 687K users for 86K businesses
+• 566K business attributes, e.g., hours, parking availability, ambience. • Social network of 687K users for a total of 4.2M social edges.
+• Aggregated check-ins over time for each of the 86K businesses
+• 200,000 pictures from the included businesses
+
+From 4 countries and multiple cities:
+• U.K.: Edinburgh
+• Germany: Karlsruhe
+• Canada: Montreal and Waterloo
+• U.S.: Pittsburgh, Charlotte, Urbana-Champaign, Phoenix, Las Vegas, Madison
+
+#2. Overview
+
+In this project, I decided to focus on one region -- Pittsburgh, and on one field -- restaurant. What I want to do is to predict the restaurant's star without using reviewers' star. 
+Here's the structure of my project:
+First, I input the data and performed data cleaning and data manipulation.
+Second, I do the exploratory data analysis. Plots are made to illustrate the data.
+Third, I built the linear mixed model within 'business' frame to perform the fit.
+Last, I extract sentiment score from 'review' and add this information to fit a new linear mixed model.
+
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -13,37 +40,45 @@ library(tidyr)
 library(ggplot2)
 library(ggmap)
 library(leaflet)
+library(lme4)
+library(arm)
+library(car)
+library(tidytext)
+library(dplyr)
+library(rgdal)
+library(stringr)
 ```
 
-```{r}
-#review <- readRDS("review.RDS")
+#3. Project
 
-#business <- stream_in(file("/Users/liuzichun/Desktop/MA684/YELP_Chanllege/yelp_dataset_challenge_academic_dataset/yelp_academic_dataset_business.json"))
-#saveRDS(business,"business.RDS")
-#users <- stream_in(file("/Users/liuzichun/Desktop/MA684/YELP_Chanllege/yelp_dataset_challenge_academic_dataset/yelp_academic_dataset_user.json"))
-#saveRDS(users,"users.RDS")
-#checkin <- stream_in(file("/Users/liuzichun/Desktop/MA684/YELP_Chanllege/yelp_dataset_challenge_academic_dataset/yelp_academic_dataset_checkin.json"))
-#saveRDS(checkin,"checkin.RDS")
-#tip <- stream_in(file("/Users/liuzichun/Desktop/MA684/YELP_Chanllege/yelp_dataset_challenge_academic_dataset/yelp_academic_dataset_tip.json"))
-#saveRDS(tip,"tip.RDS")
-
-
+##3.1 Read in data
+```{r,eval=FALSE}
+review <- readRDS("review.RDS")
+business <- stream_in(file("/Users/liuzichun/Desktop/MA684/YELP_Chanllege/yelp_dataset_challenge_academic_dataset/yelp_academic_dataset_business.json"))
+saveRDS(business,"business.RDS")
+users <- stream_in(file("/Users/liuzichun/Desktop/MA684/YELP_Chanllege/yelp_dataset_challenge_academic_dataset/yelp_academic_dataset_user.json"))
+saveRDS(users,"users.RDS")
+checkin <- stream_in(file("/Users/liuzichun/Desktop/MA684/YELP_Chanllege/yelp_dataset_challenge_academic_dataset/yelp_academic_dataset_checkin.json"))
+saveRDS(checkin,"checkin.RDS")
+tip <- stream_in(file("/Users/liuzichun/Desktop/MA684/YELP_Chanllege/yelp_dataset_challenge_academic_dataset/yelp_academic_dataset_tip.json"))
+saveRDS(tip,"tip.RDS")
 ```
 
-# I want to focus on Pittsburgh, So I will subset these data to narrow my workload
-```{r}
+I want to focus on Pittsburgh, So I will subset these data to narrow my workload
+
+```{r,eval=FALSE}
 business <- readRDS("business.RDS")
-pittbusiness <- business[business$state=="PA",]#business owners in Pittsburgh
+pittbusiness1 <- business[business$state=="PA",]#business owners in Pittsburgh
 
-categories <- pittbusiness$categories %>% unlist() %>% table() %>% sort(decreasing = TRUE) %>% as.data.frame()
+categories <- pittbusiness1$categories %>% unlist() %>% table() %>% sort(decreasing = TRUE) %>% as.data.frame()
 head(categories)
 
 index <- NULL
-for (i in 1:nrow(pittbusiness)) {
-  if(sum(c("Food","Restaurants","Nightlife","Bars","Pizza","American (Traditional)","Coffee & Tea","Sandwiches","American (New)","Italian","Chinese","Burgers","Fast Food","Breakfast & Brunch","Mexican","Bakeries","Ice Cream & Frozen Yogurt","Specialty Food","Cafes","Diners","Pubs","Desserts","Seafood","Sports Bars","Thai","Sushi Bars","Chicken Wings","Mediterranean","Salad","Japanese","Barbeque","Indian","Steakhouses","Greek","Cocktail Bars","Hot Dogs","Vegetarian","Juice Bars & Smoothies","Bagels","French","Buffets","Korean","") %in% pittbusiness$categories[[i]]) > 0) {}
+for (i in 1:nrow(pittbusiness1)) {
+  if(sum(c("Food","Restaurants","Nightlife","Bars","Pizza","American (Traditional)","Coffee & Tea","Sandwiches","American (New)","Italian","Chinese","Burgers","Fast Food","Breakfast & Brunch","Mexican","Bakeries","Ice Cream & Frozen Yogurt","Specialty Food","Cafes","Diners","Pubs","Desserts","Seafood","Sports Bars","Thai","Sushi Bars","Chicken Wings","Mediterranean","Salad","Japanese","Barbeque","Indian","Steakhouses","Greek","Cocktail Bars","Hot Dogs","Vegetarian","Juice Bars & Smoothies","Bagels","French","Buffets","Korean","") %in% pittbusiness1$categories[[i]]) > 0) {}
   else {index <- c(index,i)}
 }
-pittbusiness <- pittbusiness[-index,]#restaurants in Pittsburgh
+pittbusiness1 <- pittbusiness1[-index,]#restaurants in Pittsburgh
 
 review <- readRDS("review.RDS")
 pittreview <- subset(review, subset = business_id %in% pittbusiness$business_id)#reviews on restaurants in Pittsburgh
@@ -59,20 +94,18 @@ pittcheckin <- subset(checkin, subset = business_id %in% pittbusiness$business_i
 tip <- readRDS("tip.RDS")
 pitttip <- subset(tip, subset = business_id %in% pittbusiness$business_id) #tips on restaurants in Pittsburgh
 pitttip2 <- subset(tip, subset = user_id %in% pittusers$user_id) #tips of users who have tip on restaurants in Pittsburgh
-
-save(pittbusiness,pittreview,pittreview2,pittusers,pittcheckin,pitttip,pitttip2,file = "Pittsburgh_data.Rdata")
-
-load(file = "Pittsburgh_data.Rdata")
 ```
 
+##3.2 Data cleaning and manipulation
 
-# business manipulation
-```{r}
+The data structure I have are not suitable for analysis, so I perform manipulation on business table. In this part, I elminate the data frame in dataframe, extract useful attributes, and collapse attributes matrix into category varibles.
+
+```{r,eval=FALSE}
 pittbusiness$hours <- NULL
 pittbusiness$neighborhoods <- NULL
 attributes <- pittbusiness$attributes
 pittbusiness$attributes <- NULL
-categories <- pittbusiness$categories
+categories <- pittbusiness1$categories
 pittbusiness$categories <- NULL
 pittbusiness$type <- NULL
 
@@ -160,24 +193,26 @@ for (i in 1:nrow(attributes)) {
 }
 attributes$Music <- NULL
 
-attributes <- attributes[,c("Take-out","Noise Level","Delivery","Has TV","Outdoor Seating","Attire","Accepts Credit Cards","Price Range","Smoking","Wi-Fi","Suggest_For","Environment","Parkingcondition","Musiccondition")]
+attributes <- attributes[,c("Take-out","Noise Level","Delivery",
+                            "Has TV","Outdoor Seating","Attire","Accepts Credit Cards",
+                            "Price Range","Smoking","Wi-Fi","Suggest_For","Environment",
+                            "Parkingcondition","Musiccondition")]
 colnames(attributes)
 attributes[is.na(attributes)] <- "No Record"
 
 pittbusiness <- cbind(pittbusiness, attributes) #now I have built the pitt-business data frame with useful attributes I needed
+
+save(pittbusiness,pittreview,pittreview2,pittusers,pittcheckin,pitttip,pitttip2,file = "Pittsburgh_data.Rdata")
 ```
 
+##3.3 Exploratory data analysis on business table
 
-#Business exploration
 ```{r}
+load(file = "Pittsburgh_data.Rdata")
 #location map
 geocode("Pittsburgh")
 
-pal <- colorFactor(c("#021430","#15275b","#233482","#9ac4e0","#ffffff","#f88b9e",
-             "#f13367","#eb004e","#cb0036"), domain = c(1,1.5,2,2.5,3,3.5,4,4.5,5))
 pal1 <- colorNumeric(palette = "Blues",domain = pittbusiness$stars)
-
-
 
 
 leaflet(pittbusiness) %>% addTiles() %>% 
@@ -193,17 +228,202 @@ leaflet(pittbusiness) %>% addTiles() %>%
     labFormat = labelFormat(prefix = ""),
     opacity = 1
   )
-
-
 ```
 
-We can see that most of the restaurants are locate along the streets and have a trend of gather at down town(center of the city).
-What's more we can see from the color that in down town, northeast and other part of Pittsburgh where there are more restaurants(which means more competitors), where there have more good restaurants.
+We can see that most of the restaurants are locate along the streets and have a trend of gathering towards down town(center of the city).
+What's more we can see from the color that, in down town, northeast and other part of Pittsburgh where there are more restaurants(which means more competitors), where there have higher average stars.
+
+```{r,fig.height=3,fig.width=4}
+ggplot(pittbusiness) + geom_bar(aes(stars),fill="navy") + guides(fill=FALSE) + 
+  ggtitle("Distribution of stars")
+```
+
+We can see that most restaurants' star are within 3 and 4.5.
+
+```{r,fig.height=3,fig.width=4}
+ggplot(pittbusiness) + geom_histogram(aes(review_count),fill="navy",bins = 100) + 
+  ggtitle("Distribution of review number")
+```
+
+Most of the restaurant receive less than 150 reviews, those have reviews greater than 150 can be regard as very popular restaurants!
+
+```{r,fig.height=3,fig.width=4}
+ggplot(pittbusiness) + geom_jitter(aes(x = stars,y = review_count),color="navy") +
+  ggtitle("Relation between star and review number")
+```
+
+We can see that restaurants at low stars and high scores are all receiving relatively less reviews than others, we may say that the star of these restaurants are biased due to the small customer review size. And there is a trend from the plot: The more popular your restaurant are, the more likely your restaurant to be at 4 star. For this phenomena, on one side it is because if many people come to this restaurant, it means that this restaurant is attractive so that it tend to have high star on yelp; On the other hand, when a restaurant have large amount of customers, they can not satisfy every one's flavor, and they also have a higher chance to provide unsatisfied service, which will lower the star of the restaurant.
+
+```{r,fig.height=3,fig.width=4}
+ggplot(pittbusiness) + geom_jitter(aes(x = `Noise Level`, y = stars),color="grey") + 
+  ggtitle("Noise level and star") + geom_boxplot(aes(x = `Noise Level`, y = stars),color="navy")
+```
+
+From the plot we see that overall quiet restaurant have relatively higher star than others. And very loud restaurants are tend to be rated low stars.
+
+```{r,fig.height=3,fig.width=4}
+ggplot(pittbusiness) + geom_jitter(aes(x = Suggest_For,y = stars),color="grey") + 
+  geom_boxplot(aes(x = Suggest_For,y = stars),color="navy") + coord_flip()
+```
+
+The pattern of restaurants serve different meal have similar pattern. Dessert store have relatively high score.
 
 ```{r}
-ggplot(pittbusiness) + geom_bar(aes(stars),fill="navy") + guides(fill=FALSE)
-
-ggplot(pittbusiness) + geom_jitter(aes(x = stars,y = review_count),color="navy")
-
+ggplot(pittbusiness) + geom_jitter(aes(x = Environment,y = stars),color="grey") + 
+  geom_boxplot(aes(x = Environment,y = stars),color="navy") + coord_flip()
+ggplot(pittbusiness) + geom_jitter(aes(x = Parkingcondition,y = stars),color="grey") + 
+  geom_boxplot(aes(x = Parkingcondition,y = stars),color="navy")
+ggplot(pittbusiness) + geom_jitter(aes(x = Musiccondition,y = stars),color="grey") + 
+  geom_boxplot(aes(x = Musiccondition,y = stars),color="navy") + coord_flip()
 ```
 
+Restaurants' environment,parkingcondition and musiccondition do not have so much influence on restaurants' star.
+
+##3.4 First Linear Mixed Effect Model
+```{r,fig.height=3,fig.width=4}
+#reg1 <- lm(data = pittbusiness, stars ~ review_count +  as.factor(`Noise Level`) + as.factor(`Accepts Credit Cards`) + as.factor(`Price Range`) + as.factor(`Wi-Fi`) + Suggest_For + as.factor(Environment) + as.factor(Parkingcondition) + as.factor(Musiccondition))
+
+reg1 <- lmer(data = pittbusiness, stars ~ review_count + 
+               as.factor(`Noise Level`) + 
+               as.factor(`Accepts Credit Cards`) + 
+               as.factor(Parkingcondition) + (1|city))
+summary(reg1)
+plot(reg1)
+binnedplot(predict(reg1),resid(reg1))
+AIC(reg1)
+```
+
+First I built a model including all the variables that I suppose have effect on restaurant star rating. After fit the first model, I drop the insignificant factors and built the 'reg1', with random effect 'city', because I suppose that there may be region difference in rating a restaurant.
+From the summary we can see that all the fixed coefficient are significant. Because the outcome variable is discrete, linear pattern appeared in regular residual plot. So I plot a binned residual plot, and the result showed that most of the point fall within the two line.
+
+From the summary, we can see that every 1 review increased in a restaurant tend to increase its star at 0.0009 on average.
+
+Quiet restaurant are expected to be 0.13 star higher than average; Loud environment restaurant are expected to be 0.12 star lower than Average and Very Loud restaurant are expected to be 0.38 star lower than average.
+
+A restaurant that can park are expected to be 0.18 star higher than a restaurant that can not.
+
+After Fitting this model, I started to look at review table to see if there anything that can help me with prediction.
+
+##3.5 Exploratory data analysis on Review table
+```{r,fig.height=3,fig.width=4}
+tmp <- pittreview[,c("business_id","stars.x")]
+tmp <- as.data.table(tmp)
+tmp$business_id <- as.factor(tmp$business_id)
+tmp <- tmp[,list(avstars = mean(stars.x)),by=business_id]
+tmp1 <- pittbusiness[,c("business_id","stars")]
+
+tmp <- merge(x = tmp,y = tmp1,by="business_id",all.x=TRUE)
+
+tmp$difference <- tmp$avstars-tmp$stars
+
+ggplot(tmp) + geom_density(aes(stars),color="navy") + geom_density(aes(avstars),color="darkred")
+
+ggplot(tmp) + geom_histogram(aes(difference),bins = 200)
+
+t.test(tmp$avstars,pittbusiness$stars)
+
+reg2 <- lm(data=tmp, stars~avstars)
+summary(reg2)
+
+ggplot(tmp) + geom_point(aes(x = avstars,y = stars)) + geom_abline(slope = reg2$coefficients[[2]],intercept = reg2$coefficients[[1]])
+```
+
+From above(histgram of difference, t-test and regression fit) we can say that the average star rating is almost the same to a restaurants' star. And it is a continuous variable.
+
+So I will focus on predicting the average stars from the users by their review.
+
+##3.6 Sentiment Score for each review
+```{r,eval=FALSE}
+#votes <- pittreview$votes
+#pittreview$votes <- NULL
+#pittreview <- cbind(pittreview,votes)
+review_words <- pittreview %>% unnest_tokens(word,text)
+#review_words <- review_words %>% filter(!word %in% stop_words$word,str_detect(review_words$word, "^[a-z']+$"))
+review_words <- subset(review_words,subset = !word %in% stop_words$word)
+review_words <- review_words[str_detect(review_words$word, "^[a-z']+$"),]
+```
+
+I used the AFINN lexicon, which provides a positivity score for each word, from -5 (most negative) to 5 (most positive). 
+
+###sentiment lexicon
+```{r,eval=FALSE}
+AFINN <- sentiments %>% subset(subset= lexicon == "AFINN") 
+AFINN$sentiment <- NULL
+AFINN$lexicon <- NULL
+```
+
+###calculate sentiment score for each review
+```{r,eval=FALSE}
+reviews_sentiment <- review_words %>%
+  inner_join(AFINN, by = "word") %>%
+  group_by(review_id, stars.x) %>%
+  summarize(sentiment = mean(score))
+pittreview <- inner_join(pittreview,reviews_sentiment,by="review_id")
+```
+
+##3.7 relationship between review sentiment and review star rating
+```{r,fig.height=3,fig.width=4}
+ggplot(pittreview) + geom_jitter(aes(x = stars.x,y = sentiment),color="grey") + geom_boxplot(aes(x = stars.x,y = sentiment,group=stars.x),color="navy")
+```
+
+We can see a obvious relationship between stars and review sentiment, that is, high star restaurant tend to receive positive review.
+
+##3.8 Refit Linear Mixed Effect Model
+```{r,fig.height=3,fig.width=4}
+pittreview <- pittreview %>%
+  group_by(business_id) %>%
+  mutate(avstars = mean(stars.x))
+
+load("cate.rdata")
+
+cate <- as.data.frame(cbind(business_id = pittbusiness$business_id,categories))
+
+cate1 <- data.frame(business_id = pittbusiness$business_id, category = NA)
+
+for (i in 1:nrow(cate1)) {
+  cate1$category[i] <- cate$categories[[i]][ceiling(runif(1,0,length(cate$categories[[i]])))]
+}
+
+pittreview <- inner_join(pittreview,cate1,by="business_id")
+
+reg3 <- lm(data = pittreview, stars.y ~ (funny + useful + cool)*sentiment)
+
+summary(reg3)
+
+class(pittreview)
+pittreview <- as.data.table(pittreview)
+tmp <- pittreview[,list(avsentiment=mean(sentiment),
+                        avstars = mean(stars.x),
+                        category = first(category)),by=business_id]
+pittbusiness <- merge(pittbusiness,tmp,by="business_id",all.y=TRUE)
+
+
+reg4 <- lmer(data = pittbusiness, formula = avstars ~  as.factor(`Noise Level`) + review_count + as.factor(`Accepts Credit Cards`) + as.factor(Parkingcondition) + avsentiment + (1|city) + (1|category))
+
+#refit reg1 using avstars as outcome variable
+reg1 <- lmer(data = pittbusiness, avstars ~ review_count + as.factor(`Noise Level`) + as.factor(`Accepts Credit Cards`) + as.factor(Parkingcondition) + (1|city))
+
+summary(reg4)
+
+plot(reg4)
+
+binnedplot(predict(reg4),resid(reg4))
+
+anova(reg1,reg4)
+```
+
+From the model comparsion, we can see that the new model including sentiment score is uniformity better than the previous model, reg4 have lower AIC,BIC and deviance.
+
+And the residual plot almost normally distributed, and in binned residual plot most of the points fall within the boundaries.
+
+From the model we have to noticed that, with every unit sentiment score increase in restaurant, the star of the restaurant is expected to increase at 0.7. With shows a strong correlation between the sentiment score and restaurant rating.
+
+#4. Conclusion and Discussion
+
+Sentiment Score can significantly improve the performance of the linear mixed effect model. 
+And sentiment score is a good predictor in predicting restaurant's star or review's star. 
+
+Although we use sentimenmt score to improve the Linear mixed model. The linear model still have a relatively high residual. Thus I did not do the model validation part. 
+
+In the future, I may go deep in review text analysis, currently I just roughly calculated the sentiment score of each review. However, I did not consider the quality of review so that this may obstacle the performance of sentiment score. 
+I also want to link more data table into analysis such as user table, checkin table and tip table.
